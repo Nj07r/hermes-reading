@@ -1,0 +1,16 @@
+{
+  "name": "Reading",
+  "short_name": "Reading",
+  "description": "Newsletters, out of the inbox.",
+  "id": "/dashboard-plugins/reading/open.html",
+  "start_url": "/dashboard-plugins/reading/open.html",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#100F0F",
+  "theme_color": "#100F0F",
+  "icons": [
+    { "src": "/dashboard-plugins/reading/icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "/dashboard-plugins/reading/icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/dashboard-plugins/reading/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

@@ -1,0 +1,44 @@
+name: reading
+version: "1.0.0"
+manifest_version: 2
+description: >
+  Newsletters out of the Gmail inbox, into a reader built for them. Native Gmail filters move
+  the senders you pick into one label, even when Hermes is off. Read them in a Hermes Desktop
+  pane or on your phone, swipe through, unsubscribe in one tap, and ask Hermes about any issue
+  (the @newsletter: reference). Setup finds your newsletters for you.
+author: Vlad Sergienko
+license: MIT
+homepage: https://github.com/Nj07r/hermes-reading
+requires_hermes: ">=0.23.1"
+kind: standalone
+tags: [desktop, gmail, newsletters, reading, email, productivity]
+provides_tools: []
+provides_hooks: []
+python_dependencies: []
+config_schema:
+  label_name:
+    type: str
+    default: Reading
+    label: Gmail label
+    description: The label that holds your newsletters. Reading creates it when it is missing.
+  scan_days:
+    type: int
+    default: 30
+    label: Scan days
+    description: How far back "Find newsletters" looks in the inbox.
+  list_limit:
+    type: int
+    default: 300
+    label: Newsletters in the list
+    description: The most recent emails of the label that the reader shows.
+  mark_read:
+    type: bool
+    default: true
+    label: Mark as read when opened
+  token_path:
+    type: str
+    default: ""
+    label: Google token file
+    description: >-
+      Empty means automatic: HERMES_HOME/reading/token.json, then the google-workspace token
+      if it already has the Gmail scopes Reading needs.

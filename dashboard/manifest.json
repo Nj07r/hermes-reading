@@ -1,0 +1,7 @@
+{
+  "name": "reading",
+  "label": "Reading",
+  "description": "Newsletters out of the Gmail inbox, in a reader built for them",
+  "version": "1.0.0",
+  "api": "plugin_api.py"
+}

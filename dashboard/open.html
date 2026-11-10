@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#100F0F">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Reading">
+<link rel="manifest" href="/dashboard-plugins/reading/app.json">
+<link rel="apple-touch-icon" href="/dashboard-plugins/reading/icon-180.png">
+<title>Reading</title>
+<style>html,body{margin:0;height:100%;background:#100F0F}</style>
+</head><body>
+<script>
+/* Reading launcher. This file is public (plugin assets need no sign-in) and holds no data.
+   Signed in: open the reader. Signed out: Nous sign-in, which comes back here. The sign-in
+   refuses to return to /api addresses, which is why the reader itself cannot be the start page. */
+(async () => {
+  const APP = "/api/plugins/reading/app" + location.hash;
+  let r;
+  try { r = await fetch(APP, { method: "GET", credentials: "same-origin", cache: "no-store" }); } catch { r = null; }
+  if (r && r.ok) location.replace(APP);
+  else if (r && r.status === 401) location.replace("/auth/login?provider=nous&next=" + encodeURIComponent("/dashboard-plugins/reading/open.html" + location.hash));
+  else setTimeout(() => location.reload(), 3000);   /* Mac asleep or offline: try again */
+})();
+</script>
+</body></html>
