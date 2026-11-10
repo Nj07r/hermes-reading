@@ -3,8 +3,8 @@
 **Your newsletters, out of the inbox and into a reader built for them.**
 
 Newsletters are the good part of email, and the inbox is the worst place to read them. Reading
-moves the senders you pick into one Gmail label and gives that label a calm, fast reader: a pane
-in Hermes Desktop, and a web app on your phone. Hermes reads along with you.
+moves the senders you pick into one Gmail label and gives that label a calm, fast reader: a page in
+Hermes Desktop, and a web app on your phone. Hermes reads along with you.
 
 
 ## Why it is different
@@ -37,15 +37,15 @@ hermes plugins enable reading
 ```
 
 Restart the gateway. In Hermes Desktop, open **Settings > Plugins** and switch on **Reading**.
-The Reading tab appears on the right.
+**Reading** appears in the sidebar, under Archive.
 
 ## Set up
 
-Open the Reading pane. It walks you through three steps:
+Open **Reading** in the sidebar. It walks you through three steps:
 
 1. **Add a Google OAuth client.** Free, about 3 minutes, once: enable the Gmail API, set up the
    consent screen with yourself as a test user, create a **Desktop app** client and choose its
-   JSON file in the pane. If you use the google-workspace skill, Reading finds its client and
+   JSON file on the page. If you use the google-workspace skill, Reading finds its client and
    skips this step.
 2. **Connect Gmail.** Press **Connect Gmail** and allow access in the browser.
 3. **Pick newsletters.** Check the list that the scan found and press **Move**.
@@ -57,7 +57,7 @@ Reading for me". The bundled skill knows the steps.
 
 | Where | How |
 |---|---|
-| Hermes Desktop | The Reading pane on the right. The tab shows how many issues wait. |
+| Hermes Desktop | **Reading** in the sidebar: the list and the email side by side in the main area. |
 | Browser and phone | `http://<your dashboard>/dashboard-plugins/reading/open.html`. On a phone, add it to the home screen. |
 | Any chat | `@newsletter:` and a few letters of the subject. |
 | Terminal and cron | `hermes reading list`, `export`, `senders`, `add`, `remove`, `unsubscribe`. |

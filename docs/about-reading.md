@@ -18,8 +18,8 @@ Reading has four parts.
 - **The core** (`reading_core.py`) keeps the sender list, writes the filters, scans the inbox,
   lists and shows the label, and unsubscribes. It talks to the Gmail REST API directly and uses
   the Python standard library only.
-- **The reader** (`page.html`) is one page for every screen. In Hermes Desktop it runs in the
-  pane. In a browser it runs through the Hermes dashboard, so it also works on a phone.
+- **The reader** (`page.html`) is one page for every screen. In Hermes Desktop it is a page in
+  the main area (sidebar row **Reading**). In a browser it runs through the Hermes dashboard, so it also works on a phone.
 - **The agent half** gives Hermes the `hermes reading` command, the `@newsletter:` reference
   and a skill. With these, Hermes can set Reading up, change senders, and read newsletters for
   digests.
@@ -46,10 +46,10 @@ receipts and security alerts. If those disappeared from the inbox, Reading would
 scan ticks a sender only when it looks like a newsletter: a known newsletter platform, or a list
 with two or more issues. You see every sender it found and decide.
 
-## Why the pane shows the web page
+## Why Desktop shows the web page
 
-The Desktop pane and the phone use the same `page.html`. One reader means one set of keys, one
-dark mode and one set of fixes for difficult newsletters. In the pane, a small bridge gives the
+Hermes Desktop and the phone use the same `page.html`. One reader means one set of keys, one
+dark mode and one set of fixes for difficult newsletters. In Desktop, a small bridge gives the
 page what a browser tab gives it elsewhere: the API, the clipboard, the system browser for links,
 and a door to a new Hermes chat.
 

@@ -3,8 +3,8 @@ version: "1.0.0"
 manifest_version: 2
 description: >
   Newsletters out of the Gmail inbox, into a reader built for them. Native Gmail filters move
-  the senders you pick into one label, even when Hermes is off. Read them in a Hermes Desktop
-  pane or on your phone, swipe through, unsubscribe in one tap, and ask Hermes about any issue
+  the senders you pick into one label, even when Hermes is off. Read them in Hermes Desktop
+  (sidebar row Reading) or on your phone, swipe through, unsubscribe in one tap, and ask Hermes about any issue
   (the @newsletter: reference). Setup finds your newsletters for you.
 author: Vlad Sergienko
 license: MIT

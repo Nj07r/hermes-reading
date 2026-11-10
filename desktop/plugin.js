@@ -1,37 +1,30 @@
 /**
- * Reading for Hermes Desktop: the same reader page as the web app, in a right pane.
+ * Reading for Hermes Desktop: the same reader page as the web app, as a full page in the main
+ * area (sidebar row "Reading", route /reading), so the list and the email sit side by side.
  *
  * The pane asks the backend for page.html (/call/page) and shows it in a srcdoc frame. The page
  * finds parent.__readingHost (same origin) and uses it instead of fetch, window.open and the clipboard:
  *   call  -> ctx.rest('/call/<name>?id=')  (the plugin REST door, Desktop auth applies)
  *   open  -> ctx.os.openExternal(url)      (links open in the system browser)
  *   copy  -> ctx.os.writeClipboard(text)
- *   count -> the number in the pane tab
+ *   count -> the number of waiting emails (kept for the sidebar)
  *   ask   -> a new chat with "@newsletter:<id>" in the composer (the agent half expands it)
  *   chat  -> a new chat with a prompt in the composer
  * Emails still render in the page's own nested frames: sanitised, CSP script-src 'none'.
  */
-import { host } from '@hermes/plugin-sdk'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { host, ROUTES_AREA, SIDEBAR_NAV_AREA } from '@hermes/plugin-sdk'
+import { useEffect, useState } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
 
 const ID = 'reading'
-const PANE_ID = 'pane'
+const PATH = '/reading'
 
 let pluginCtx = null
 
-// Tiny store for the tab count, so the tab title re-renders without the page.
 let count = 0
-const listeners = new Set()
 const setCount = n => {
   count = Number(n) || 0
-  listeners.forEach(fn => fn())
 }
-const useCount = () =>
-  useSyncExternalStore(
-    fn => (listeners.add(fn), () => listeners.delete(fn)),
-    () => count
-  )
 
 // A fresh chat draft mounts a moment after newChat(): retry until its composer takes the text.
 async function draftInNewChat(text) {
@@ -77,12 +70,16 @@ function paneDoc(html) {
     .replace(/<head>/i, m => m + head)
 }
 
-function ReadingPane() {
-  const [doc, setDoc] = useState(null)
+// The page HTML is fetched once per app session; leaving and coming back does not refetch it.
+let cachedDoc = null
+
+function ReadingPage() {
+  const [doc, setDoc] = useState(cachedDoc)
   const [error, setError] = useState(null)
   const [nonce, setNonce] = useState(0)
 
   useEffect(() => {
+    if (cachedDoc && !nonce) return
     let live = true
     setError(null)
     bridge
@@ -90,7 +87,8 @@ function ReadingPane() {
       .then(res => {
         if (!live) return
         if (!res?.html) throw new Error(res?.error || 'No page from the Reading backend')
-        setDoc(paneDoc(res.html))
+        cachedDoc = paneDoc(res.html)
+        setDoc(cachedDoc)
       })
       .catch(err => live && setError(err?.message || String(err)))
     return () => {
@@ -126,14 +124,6 @@ function ReadingPane() {
   })
 }
 
-function TabTitle() {
-  const n = useCount()
-  return jsxs('span', {
-    className: 'inline-flex items-baseline gap-1',
-    children: ['Reading', n > 0 && jsx('span', { className: 'tabular-nums text-(--ui-accent)', children: n > 99 ? '99+' : n })]
-  })
-}
-
 export default {
   id: ID,
   name: 'Reading',
@@ -144,18 +134,16 @@ export default {
       if (window.__readingHost === bridge) delete window.__readingHost
     })
     ctx.register({
-      id: PANE_ID,
-      area: 'panes',
+      id: 'page',
+      area: ROUTES_AREA,
       title: 'Reading',
-      data: {
-        placement: 'right',
-        width: '420px',
-        minWidth: 340,
-        hideOnly: true,
-        tabTitle: () => jsx(TabTitle, {}),
-        tabTitleText: () => (count ? `Reading (${count})` : 'Reading')
-      },
-      render: () => jsx(ReadingPane, {})
+      data: { path: PATH },
+      render: () => jsx(ReadingPage, {})
+    })
+    ctx.register({
+      id: 'nav',
+      area: SIDEBAR_NAV_AREA,
+      data: { path: PATH, label: 'Reading', codicon: 'book' }
     })
   }
 }

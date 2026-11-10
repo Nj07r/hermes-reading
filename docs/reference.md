@@ -72,7 +72,7 @@ searches the subjects and senders of the 100 newest emails in the label.
 
 | Call | Body | Returns |
 |---|---|---|
-| `page` | | `html`: the text of `page.html` (the Desktop pane uses it). |
+| `page` | | `html`: the text of `page.html` (the Desktop page uses it). |
 | `status` | | `client`, `connected`, `account`, `label`, `senders`, `ready`, `pending`. |
 | `client` | `{"client": <JSON or text>}` | Saves the OAuth client. |
 | `auth_start` | | `url`: the Google sign-in address. Starts a one-shot listener on `127.0.0.1`. |
@@ -86,9 +86,9 @@ searches the subjects and senders of the 100 newest emails in the label.
 | `trash`, `untrash` | | Moves the email to the Gmail Trash, or back. |
 | `unsubscribe` | `{"trash": bool}` | `method` (`one-click`, `email` or `link`), `url` for `link`, `trashed`. |
 
-## Desktop pane bridge
+## Desktop page bridge
 
-`desktop/plugin.js` shows `page.html` in a frame and puts `window.__readingHost` on the Desktop
+`desktop/plugin.js` adds the route `/reading` and the sidebar row **Reading**. It shows `page.html` in a frame and puts `window.__readingHost` on the Desktop
 window. The page finds it as `parent.__readingHost`.
 
 | Member | Effect |
@@ -96,6 +96,6 @@ window. The page finds it as `parent.__readingHost`.
 | `call(name, id, method, body)` | The page API call, through the plugin REST door. |
 | `open(url)` | Opens an `http` or `https` address in the system browser. |
 | `copy(text)` | Writes the system clipboard. |
-| `count(n)` | Sets the number in the pane tab. |
+| `count(n)` | Receives the number of waiting emails. |
 | `ask(id)` | Opens a new chat with `@newsletter:<id>` in the composer. |
 | `chat(text)` | Opens a new chat with the text in the composer. |

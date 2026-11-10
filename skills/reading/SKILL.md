@@ -12,7 +12,7 @@ metadata:
 # Reading: newsletters out of the inbox
 
 Reading moves the newsletters a user picks out of the Gmail inbox into one label (default
-`Reading`) with native Gmail filters, and shows that label in a reader: the Hermes Desktop pane,
+`Reading`) with native Gmail filters, and shows that label in a reader: the Reading page in Hermes Desktop,
 or any browser through the dashboard. Everything below runs with the terminal tool.
 
 ## When to Use
@@ -34,14 +34,14 @@ or any browser through the dashboard. Everything below runs with the terminal to
    - Client: https://console.cloud.google.com/auth/clients > Create client > Desktop app >
      Download JSON.
    - Then: `hermes reading setup --client <path to the JSON>`.
-3. Connect: the Reading pane has a **Connect Gmail** button. From a terminal on the machine that
+3. Connect: the Reading page (sidebar) has a **Connect Gmail** button. From a terminal on the machine that
    runs Hermes: `hermes reading setup` (it opens the browser). If the browser is on another
    machine, use `hermes reading setup --manual` and let the user paste the address they land on.
    Never ask the user to paste a password or the client secret into chat.
 4. Pick newsletters: `hermes reading scan` lists mailing-list senders of the last 30 days. `[x]`
    marks the ones that look like newsletters. Show the list, let the user choose, then
    `hermes reading add <emails...>`, or `hermes reading scan --add suggested` if they agree with
-   the ticks. The pane does the same with checkboxes.
+   the ticks. The Reading page does the same with checkboxes.
 
 ## Senders
 

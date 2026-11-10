@@ -376,13 +376,13 @@ body.idle .acts, body.idle #pos, body.idle #dock { visibility: hidden; }
 
 <script>
 "use strict";
-/* In the Hermes Desktop pane, the page runs in a srcdoc frame and desktop/plugin.js injects
+/* In Hermes Desktop, the page runs in a srcdoc frame and desktop/plugin.js injects
    window.__readingHost on its own window: calls go through the plugin REST door, links and copy through the OS door. */
 const HOST = (() => { try { return window.parent !== window && window.parent.__readingHost || null; } catch { return null; } })();
 const API = HOST ? "" : location.pathname.replace(/\/(app\/?)?$/, "");   /* "/api/plugins/reading" on the dashboard */
 function setHash(id) { if (!HOST) history.replaceState(null, "", id ? "#" + encodeURIComponent(id) : location.pathname); }
 function openUrl(url) { if (!/^https?:/i.test(url || "")) return; if (HOST) HOST.open(url); else window.open(url, "_blank", "noopener"); }
-/* In the pane, links must open in the system browser, not in a new Electron window. */
+/* In Desktop, links must open in the system browser, not in a new Electron window. */
 function routeLinks(doc) {
   if (!HOST || doc._routed) return;
   doc._routed = true;
