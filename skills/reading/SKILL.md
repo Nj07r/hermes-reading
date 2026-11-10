@@ -25,19 +25,18 @@ or any browser through the dashboard. Everything below runs with the terminal to
 ## Setup (help the user through it)
 
 1. `hermes reading status`. If it says connected, skip to step 4.
-2. OAuth client. Reading uses the user's own Google OAuth client (free, once). If the user
-   already set up the google-workspace skill, Reading finds that client. Otherwise walk them
+2. OAuth client. Reading uses the user's own Google OAuth client (free, once). Walk them
    through it, one step at a time, and wait for each:
    - Enable the Gmail API: https://console.cloud.google.com/apis/library/gmail.googleapis.com
    - Consent screen: https://console.cloud.google.com/auth/overview. Choose External and add
      their own address under Audience > Test users.
    - Client: https://console.cloud.google.com/auth/clients > Create client > Desktop app >
      Download JSON.
-   - Then: `hermes reading setup --client <path to the JSON>`.
-3. Connect: the Reading page (sidebar) has a **Connect Gmail** button. From a terminal on the machine that
-   runs Hermes: `hermes reading setup` (it opens the browser). If the browser is on another
-   machine, use `hermes reading setup --manual` and let the user paste the address they land on.
-   Never ask the user to paste a password or the client secret into chat.
+3. Connect: the user runs `hermes reading setup --client <path to the JSON>` in their own
+   terminal. It saves the client and runs `hermes auth add reading:google`, the Hermes sign-in.
+   You cannot run that sign-in for them: Hermes refuses it from an agent session. Add
+   `--no-browser` when the browser is on another machine. Never ask the user to paste a
+   password, the client secret or a code into chat.
 4. Pick newsletters: `hermes reading scan` lists mailing-list senders of the last 30 days. `[x]`
    marks the ones that look like newsletters. Show the list, let the user choose, then
    `hermes reading add <emails...>`, or `hermes reading scan --add suggested` if they agree with

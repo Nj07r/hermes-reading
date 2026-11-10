@@ -6,7 +6,7 @@ All commands start with `hermes reading`.
 
 | Command | Effect |
 |---|---|
-| `setup [--client FILE] [--manual]` | Saves the OAuth client (if given), connects Gmail, then lists the newsletters that the scan found. `--manual` prints the Google address and reads the redirect address from the terminal. |
+| `setup [--client FILE] [--no-browser]` | With `--client`: saves the client id and secret of the Google client JSON as `READING_GOOGLE_CLIENT_ID` and `READING_GOOGLE_CLIENT_SECRET` (`hermes config set`). Then runs `hermes auth add reading:google` when Gmail is not connected, and lists the newsletters that the scan found. `--no-browser` prints the Google address instead of opening it. |
 | `status [--json]` | Shows the connection, the account, the label and the sender count. |
 | `scan [--days N] [--add suggested\|all] [--json]` | Lists the mailing-list senders in the inbox of the last N days. `--add` routes the suggested senders or all of them. |
 | `senders [--json]` | Lists the routed senders. |
@@ -30,7 +30,6 @@ Desktop **Settings > Plugins > Reading**, or `config.yaml` under `plugins.entrie
 | `scan_days` | `30` | How far back the newsletter scan reads the inbox. |
 | `list_limit` | `300` | The most recent emails of the label that the reader shows. |
 | `mark_read` | `true` | Opening an email in the reader marks it as read. |
-| `token_path` | empty | A Google token file to use. Empty means automatic (see Files). |
 
 ## Files
 
@@ -40,10 +39,11 @@ Desktop **Settings > Plugins > Reading**, or `config.yaml` under `plugins.entrie
 |---|---|
 | `HERMES_HOME/reading/senders.json` | The routed senders. A sorted JSON array of lower-case addresses. |
 | `HERMES_HOME/reading/state.json` | The ids of the Gmail filters that Reading owns, and a hash of the last synced list. |
-| `HERMES_HOME/reading/client_secret.json` | The Google OAuth client, mode 600. |
-| `HERMES_HOME/reading/token.json` | Reading's Google token, mode 600. |
-| `HERMES_HOME/google_client_secret.json` | Used when Reading has no client of its own (google-workspace skill). |
-| `HERMES_HOME/google_token.json` | Used when Reading has no token of its own and this token has both scopes. Reading never writes it. |
+
+Reading stores no credentials. The Google client id and secret are the `.env` variables
+`READING_GOOGLE_CLIENT_ID` and `READING_GOOGLE_CLIENT_SECRET`. Hermes stores the sign-in under
+`reading:google` in its own `auth.json` and refreshes it. Manage it with
+`hermes auth status|refresh|logout reading:google`.
 
 ## Gmail
 
@@ -73,10 +73,7 @@ searches the subjects and senders of the 100 newest emails in the label.
 | Call | Body | Returns |
 |---|---|---|
 | `page` | | `html`: the text of `page.html` (the Desktop page uses it). |
-| `status` | | `client`, `connected`, `account`, `label`, `senders`, `ready`, `pending`. |
-| `client` | `{"client": <JSON or text>}` | Saves the OAuth client. |
-| `auth_start` | | `url`: the Google sign-in address. Starts a one-shot listener on `127.0.0.1`. |
-| `auth_finish` | `{"url": "<redirect address>"}` | Finishes the sign-in from a pasted address. |
+| `status` | | `client` (the client id is set), `connected`, `account`, `label`, `senders`, `ready`, `sign_in` (the command), `error`. |
 | `scan` | `{"days": N}` (optional) | `scanned`, `days`, `candidates`: `email`, `name`, `count`, `last_subject`, `last_ts`, `suggest`. |
 | `senders` | | `senders`: `email`, `name`, `count` (emails in the label). |
 | `senders_add` | `{"emails": [...]}` | The sync report and `added`. |

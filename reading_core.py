@@ -5,8 +5,10 @@ Senders in ``<HERMES_HOME>/reading/senders.json`` skip the inbox and land in one
 off. The reader page (page.html) lists and shows that label, in the Hermes Desktop pane and
 in any browser through the dashboard.
 
-Standard library only. It talks to the Gmail REST API with the token from reading_auth. The
-access token lives in memory.
+Standard library only, plus Hermes's own sign-in helper: every Gmail call goes through
+``credentialed_provider_request("google", ...)``. Hermes runs the Google sign-in
+(``hermes auth add reading:google``), stores the grant and refreshes it. Reading never holds a
+token or a client secret.
 
 The page calls ``api_<name>(arg, body)`` through dashboard/plugin_api.py, which reloads this
 module per request, so page and core changes need no gateway restart.
@@ -28,11 +30,13 @@ from concurrent.futures import ThreadPoolExecutor
 from email.message import EmailMessage
 from pathlib import Path
 
-import reading_auth as auth
 
 PLUGIN_ID = "reading"
-PLUGIN_DIR = Path(__file__).resolve().parent
+PLUGIN_DIR = Path(__file__).absolute().parent
 API = "https://gmail.googleapis.com/gmail/v1/users/me"
+CLIENT_ID_ENV = "READING_GOOGLE_CLIENT_ID"
+CLIENT_SECRET_ENV = "READING_GOOGLE_CLIENT_SECRET"
+SIGN_IN = "hermes auth add reading:google"
 FILTER_CHUNK = 20  # senders per Gmail filter; keeps each filter query well under Gmail's size limit
 SCAN_MAX = 500     # inbox messages the newsletter scan reads at most
 TEXT_MAX = 40_000  # characters of newsletter text handed to Hermes
@@ -40,13 +44,15 @@ TEXT_MAX = 40_000  # characters of newsletter text handed to Hermes
 # Caches survive importlib.reload(): they live on a module object that is never reloaded.
 _C = sys.modules.setdefault("_reading_cache", types.ModuleType("_reading_cache"))
 if not hasattr(_C, "meta"):
-    _C.meta, _C.token, _C.label_id, _C.email = {}, None, None, None
-if not hasattr(_C, "token_path"):
-    _C.token_path, _C.label_name = None, None
+    _C.meta, _C.label_id, _C.email = {}, None, None
+if not hasattr(_C, "label_name"):
+    _C.label_name = None
 
 
 class GmailError(RuntimeError):
-    pass
+    def __init__(self, message: str, code: str = ""):
+        super().__init__(message)
+        self.code = code
 
 
 # ---------- settings ----------
@@ -83,7 +89,11 @@ def label_name() -> str:
 
 
 def data_dir() -> Path:
-    return auth.data_dir()
+    import os
+    home = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
+    d = home / PLUGIN_ID
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def senders_path() -> Path:
@@ -94,45 +104,39 @@ def state_path() -> Path:
     return data_dir() / "state.json"
 
 
-# ---------- auth + HTTP ----------
+# ---------- Gmail over Hermes's sign-in ----------
 
-def _token() -> tuple[dict, Path]:
-    found = auth.find_token(str(setting("token_path", "") or ""))
-    if not found:
-        raise GmailError("Gmail is not connected. Open Reading to connect it, or run `hermes reading setup`.")
-    return found
+NOT_CONNECTED = f"Gmail is not connected. In a terminal, run `hermes reading setup` (or `{SIGN_IN}`)."
 
 
-def _access_token() -> str:
-    tok = _C.token
-    if tok and tok[1] > time.time() + 60:
-        return tok[0]
-    token, path = _token()
+def client_configured() -> bool:
+    """True when this profile has the Google client id Reading declares (the secret is optional)."""
     try:
-        _C.token = auth.refresh(token)
-    except auth.AuthError as exc:
-        raise GmailError(str(exc))
-    if _C.token_path != str(path):  # another account: drop what belongs to the old one
-        _C.token_path, _C.meta, _C.label_id, _C.email = str(path), {}, None, None
-    return _C.token[0]
+        from agent.secret_scope import get_secret
+    except ImportError:
+        return False
+    return bool(str(get_secret(CLIENT_ID_ENV) or "").strip())
 
 
-def _call(method: str, path: str, params: dict | None = None, body=None, _retry=True):
+def _call(method: str, path: str, params: dict | None = None, body=None):
+    from hermes_cli.auth_constants import AuthError
+    from hermes_cli.plugin_provider_requests import ProviderNotSignedIn, credentialed_provider_request
+
     url = API + path
     if params:
         url += "?" + urllib.parse.urlencode(params, doseq=True)
-    data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(url, data=data, method=method, headers={
-        "Authorization": f"Bearer {_access_token()}", "Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            raw = r.read()
-            return json.loads(raw) if raw else {}
-    except urllib.error.HTTPError as exc:
-        if exc.code == 401 and _retry:
-            _C.token = None
-            return _call(method, path, params, body, _retry=False)
-        raise GmailError(f"{method} {path} -> {exc.code}: {exc.read()[:400].decode('utf-8', 'replace')}")
+        resp = credentialed_provider_request("google", method, url, json=body, timeout=30)
+    except ProviderNotSignedIn:
+        raise GmailError(NOT_CONNECTED, code="not_signed_in")
+    except AuthError as exc:
+        code = getattr(exc, "code", "") or "auth"
+        raise GmailError(f"Google sign-in problem ({code}): {exc}", code=code)
+    if resp.status == 401:
+        raise GmailError(NOT_CONNECTED, code="not_signed_in")
+    if resp.status >= 300:
+        raise GmailError(f"{method} {path} -> {resp.status}: {resp.text[:400]}")
+    return resp.json() if resp.body else {}
 
 
 # ---------- label + account ----------
@@ -606,16 +610,15 @@ def unsubscribe(msg_id: str, trash_existing: bool = False) -> dict:
 # ---------- status ----------
 
 def status() -> dict:
-    client = auth.load_client()
-    found = auth.find_token(str(setting("token_path", "") or ""))
-    out = {"ok": True, "client": bool(client), "connected": bool(found), "label": label_name(),
-           "senders": len(load_senders()), "account": None, "token": str(found[1]) if found else None,
-           "pending": auth.pending()}
-    if found:
+    out = {"ok": True, "client": client_configured(), "connected": False, "label": label_name(),
+           "senders": len(load_senders()), "account": None, "sign_in": SIGN_IN}
+    if out["client"]:
         try:
             out["account"] = account_email()
+            out["connected"] = True
         except GmailError as exc:
-            out.update(connected=False, error=str(exc))
+            if getattr(exc, "code", "") != "not_signed_in":
+                out["error"] = str(exc)
     out["ready"] = out["connected"] and out["senders"] > 0
     return out
 
@@ -649,25 +652,6 @@ def api_trash(msg_id: str, body=None) -> dict:
 
 def api_untrash(msg_id: str, body=None) -> dict:
     return untrash(msg_id)
-
-
-def api_client(_arg="", body=None) -> dict:
-    """Save an uploaded Google OAuth client JSON."""
-    raw = _body(body).get("client")
-    if isinstance(raw, str):
-        raw = json.loads(raw)
-    path = auth.save_client(raw)
-    return {"ok": True, "path": str(path)}
-
-
-def api_auth_start(_arg="", body=None) -> dict:
-    return {"ok": True, **auth.start()}
-
-
-def api_auth_finish(_arg="", body=None) -> dict:
-    out = auth.finish(_body(body).get("url", ""))
-    _C.token = None
-    return out
 
 
 def api_scan(_arg="", body=None) -> dict:

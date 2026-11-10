@@ -5,12 +5,13 @@ import argparse
 import json
 import re
 import sys
+import os
+import shutil
+import subprocess
 import time
-import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import reading_auth as auth
 import reading_core as core
 
 USAGE = """examples:
@@ -28,7 +29,27 @@ CLIENT_HELP = """Reading needs a Google OAuth client (free, about 3 minutes, onc
      (External, add your own address under Audience > Test users)
   3. https://console.cloud.google.com/auth/clients  ->  Create client  ->  Desktop app  ->  Download JSON
   4. hermes reading setup --client ~/Downloads/client_secret_....json
-Already use the google-workspace skill? Its client works too: Reading finds it by itself."""
+Step 4 saves the client id and secret in this profile's .env (READING_GOOGLE_CLIENT_ID,
+READING_GOOGLE_CLIENT_SECRET) with `hermes config set`, then runs `hermes auth add reading:google`.
+Hermes runs the sign-in and keeps the token; Reading never sees it."""
+
+# Children get no auto-approve or YOLO mode from the parent (catalog rule 12).
+_DROP_ENV = ("HERMES_YOLO", "HERMES_ACP_AUTO_APPROVE")
+
+
+def _hermes(*args: str) -> int:
+    exe = shutil.which("hermes") or "hermes"
+    env = {k: v for k, v in os.environ.items() if not k.startswith(_DROP_ENV)}
+    return subprocess.call([exe, *args], env=env)
+
+
+def _read_client(path: str) -> tuple[str, str]:
+    data = json.loads(Path(path).expanduser().read_text())
+    block = data.get("installed") or data.get("web") or data
+    cid, secret = str(block.get("client_id") or ""), str(block.get("client_secret") or "")
+    if not cid.endswith(".apps.googleusercontent.com"):
+        raise SystemExit("reading: that file has no Google client_id. Download the JSON of a Desktop app client.")
+    return cid, secret
 
 
 def parse_since(text: str) -> int:
@@ -45,7 +66,7 @@ def setup(parser) -> None:
 
     s = sub.add_parser("setup", help="connect Gmail and pick newsletters")
     s.add_argument("--client", help="path to the Google OAuth client JSON (Desktop app)")
-    s.add_argument("--manual", action="store_true", help="no local browser: paste the address instead")
+    s.add_argument("--no-browser", action="store_true", help="print the Google address instead of opening a browser")
 
     st = sub.add_parser("status", help="connection, label and sender count")
     st.add_argument("--json", action="store_true")
@@ -88,33 +109,18 @@ def _print(data) -> None:
     print(json.dumps(data, indent=1, ensure_ascii=False))
 
 
-def _connect(client_file: str | None, manual: bool) -> None:
+def _connect(client_file: str | None, no_browser: bool) -> None:
     if client_file:
-        path = auth.save_client(json.loads(Path(client_file).expanduser().read_text()))
-        print(f"Saved the OAuth client to {path}")
-    if not auth.load_client():
+        cid, secret = _read_client(client_file)
+        for name, value in ((core.CLIENT_ID_ENV, cid), (core.CLIENT_SECRET_ENV, secret)):
+            if value and _hermes("config", "set", name, value) != 0:
+                raise SystemExit(f"reading: could not save {name}")
+    if not core.client_configured() and not client_file:
         print(CLIENT_HELP)
         raise SystemExit(1)
-    flow = auth.start(listen=not manual)
-    print("Open this address and allow Reading to use Gmail:\n\n  " + flow["url"] + "\n")
-    if manual:
-        pasted = input("Then paste the address of the page you land on (it may not load): ")
-        auth.finish(pasted)
-    else:
-        webbrowser.open(flow["url"])
-        print("Waiting for Google (Ctrl+C to stop)...")
-        deadline = time.time() + auth.FLOW_TTL
-        while time.time() < deadline:
-            p = auth.pending()
-            if not p["pending"]:
-                break
-            if p.get("error"):
-                raise SystemExit(f"reading: {p['error']}")
-            time.sleep(1)
-    found = auth.find_token()
-    if not found:
-        raise SystemExit("reading: the sign-in did not finish. Run setup again (or with --manual).")
-    core._C.token = None
+    if _hermes("auth", "add", "reading:google", *(["--no-browser"] if no_browser else [])) != 0:
+        raise SystemExit("reading: the Google sign-in did not finish. Run `hermes reading setup` again.")
+    core._C.email = None
     print(f"Connected as {core.account_email()}.")
 
 
@@ -132,8 +138,8 @@ def run(args) -> int:
     cmd = getattr(args, "reading_cmd", None)
     try:
         if cmd == "setup":
-            if not auth.find_token() or args.client:
-                _connect(args.client, args.manual)
+            if not core.status()["connected"] or args.client:
+                _connect(args.client, args.no_browser)
             else:
                 print(f"Already connected as {core.account_email()}.")
             if not core.load_senders():
@@ -147,7 +153,9 @@ def run(args) -> int:
                 _print(st)
             else:
                 print(f"Gmail: {'connected as ' + str(st['account']) if st['connected'] else 'not connected'}")
-                print(f"OAuth client: {'found' if st['client'] else 'missing (see hermes reading setup)'}")
+                print(f"OAuth client: {'set' if st['client'] else 'missing (see hermes reading setup)'}")
+                if st.get("error"):
+                    print(f"Problem: {st['error']}")
                 print(f"Label: {st['label']}    Senders: {st['senders']}")
         elif cmd == "scan":
             found = core.scan(args.days)
@@ -191,7 +199,7 @@ def run(args) -> int:
         else:
             print(USAGE)
             return 2
-    except (core.GmailError, auth.AuthError) as exc:
+    except core.GmailError as exc:
         print(f"reading: {exc}", file=sys.stderr)
         return 1
     return 0

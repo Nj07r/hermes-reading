@@ -12,10 +12,9 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).absolute().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-import reading_auth  # noqa: E402
 import reading_core as core  # noqa: E402
 
 router = APIRouter()
@@ -29,7 +28,6 @@ def app_page():
 
 @router.api_route("/call/{name}", methods=["GET", "POST"])
 async def call(name: str, request: Request, id: str = ""):  # noqa: A002 - query parameter name
-    importlib.reload(reading_auth)
     importlib.reload(core)
     fn = getattr(core, f"api_{name}", None) if name.isidentifier() else None
     if fn is None:

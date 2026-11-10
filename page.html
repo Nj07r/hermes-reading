@@ -1104,55 +1104,42 @@ function renderConnect(error = "") {
   steps("connect");
   const body = $("#setupBody");
   const askBtn = HOST?.chat ? `<button class="btn" id="askSetup"><svg class="i"><use href="#i-spark"/></svg>Ask Hermes to walk me through it</button>` : "";
-  if (!ST?.client) {
-    body.innerHTML = `<div class="card"><h3>Add a Google OAuth client</h3>
+  const cmd = ST?.client ? (ST.sign_in || "hermes auth add reading:google") : "hermes reading setup --client ~/Downloads/client_secret_….json";
+  const head = ST?.client
+    ? `<h3>Sign in to Google</h3><p>Your Google client is set. Run this in a terminal: Hermes opens the Google sign-in and keeps the token. Reading never sees it.</p>`
+    : `<h3>Connect Gmail</h3>
       <p>Reading talks to Gmail with your own Google client, so your mail goes to no one else. It is free and takes about 3 minutes, once.</p>
       <ol>
         <li><a href="https://console.cloud.google.com/apis/library/gmail.googleapis.com" target="_blank">Enable the Gmail API</a> in a Google Cloud project.</li>
         <li><a href="https://console.cloud.google.com/auth/overview" target="_blank">Set up the consent screen</a>: External, and add your own address under Audience &gt; Test users.</li>
         <li><a href="https://console.cloud.google.com/auth/clients" target="_blank">Create a client</a> of type <b>Desktop app</b> and download its JSON.</li>
-      </ol>
-      <div class="btns"><label class="btn primary" style="cursor:pointer">Choose the JSON file<input type="file" id="clientFile" accept=".json,application/json" hidden></label>${askBtn}</div>
-      <p class="muted" style="margin:12px 0 0">Already use the google-workspace skill? Reading finds its client by itself.</p>
-      <div class="err">${esc(error)}</div></div>`;
-    $("#clientFile").addEventListener("change", async (e) => {
-      const f = e.target.files[0]; if (!f) return;
-      try { await api("client", "", "POST", { client: await f.text() }); ST = await api("status"); renderConnect(); }
-      catch (err) { renderConnect(err.message); }
-    });
-  } else {
-    body.innerHTML = `<div class="card"><h3>Connect Gmail</h3>
-      <p>Google asks you to allow two things: read and organize your mail, and manage filters. Reading uses them only to move, show and delete your newsletters.</p>
-      <div class="btns"><button class="btn primary" id="connect">Connect Gmail</button>${askBtn}</div>
-      <div id="connectWait"></div><div class="err">${esc(error)}</div></div>`;
-    $("#connect").addEventListener("click", startAuth);
-  }
-  $("#askSetup")?.addEventListener("click", () => HOST.chat("Help me set up the Reading plugin: create the Google OAuth client for Gmail and connect it. Use the reading skill."));
+        <li>Run this in a terminal. It saves the client and opens the Google sign-in:</li>
+      </ol>`;
+  body.innerHTML = `<div class="card">${head}
+      <div class="field"><input id="setupCmd" readonly value="${esc(cmd)}"><button class="btn" id="copyCmd">Copy</button></div>
+      <div class="wait" style="margin-top:14px"><i></i>Waiting for the sign-in. This page moves on by itself.</div>
+      <div class="btns" style="margin-top:14px"><button class="btn primary" id="checkAgain">Check again</button>${askBtn}</div>
+      <div class="err" id="authErr">${esc(error || ST?.error || "")}</div></div>`;
+  $("#copyCmd").addEventListener("click", async () => {
+    const v = $("#setupCmd").value;
+    try { if (HOST?.copy) await HOST.copy(v); else await navigator.clipboard.writeText(v); toast("Copied"); }
+    catch { $("#setupCmd").select(); }
+  });
+  $("#checkAgain").addEventListener("click", () => checkConnected(true));
+  $("#askSetup")?.addEventListener("click", () => HOST.chat("Help me set up the Reading plugin: create the Google OAuth client for Gmail. Then tell me the command to run in my terminal. Use the reading skill."));
+  clearInterval(pollTimer);
+  pollTimer = setInterval(() => checkConnected(false), 3000);
 }
 
-async function startAuth() {
-  const wait = $("#connectWait");
-  let url;
-  try { url = (await api("auth_start", "", "POST")).url; }
-  catch (e) { renderConnect(e.message); return; }
-  openUrl(url);
-  wait.innerHTML = `<div class="wait" style="margin-top:14px"><i></i>Waiting for Google. Finish in the browser tab that opened.</div>
-    <p class="muted" style="margin:14px 0 0">Browser on another computer, or the last page did not load? Copy its address from the address bar and paste it here.</p>
-    <div class="field"><input id="pasted" placeholder="http://127.0.0.1:…/?state=…&code=…"><button class="btn" id="pasteGo">Finish</button></div>
-    <p class="muted" style="margin:8px 0 0"><span class="linkish" id="openAgain">Open the Google page again</span></p><div class="err" id="authErr"></div>`;
-  $("#openAgain").addEventListener("click", () => openUrl(url));
-  $("#pasteGo").addEventListener("click", async () => {
-    try { await api("auth_finish", "", "POST", { url: $("#pasted").value }); await afterAuth(); }
-    catch (e) { $("#authErr").textContent = e.message; }
-  });
-  clearInterval(pollTimer);
-  pollTimer = setInterval(async () => {
-    try {
-      const st = await api("status");
-      if (st.connected) { clearInterval(pollTimer); ST = st; afterAuth(); }
-      else if (st.pending?.error) $("#authErr").textContent = st.pending.error;
-    } catch {}
-  }, 2000);
+async function checkConnected(loud) {
+  try {
+    const st = await api("status");
+    const changed = !!st.client !== !!ST?.client;
+    ST = st;
+    if (st.connected) { afterAuth(); return; }
+    if (changed) renderConnect();
+    else if (loud) $("#authErr").textContent = st.error || "Not signed in yet.";
+  } catch (e) { if (loud) $("#authErr").textContent = e.message; }
 }
 async function afterAuth() {
   clearInterval(pollTimer);

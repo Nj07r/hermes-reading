@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT))
 TMP = tempfile.mkdtemp(prefix="reading-test-")
 os.environ["HERMES_HOME"] = TMP
 
-import reading_auth as auth  # noqa: E402
+import reading_cli as cli  # noqa: E402
 import reading_core as core  # noqa: E402
 
 
@@ -161,42 +161,77 @@ class SyncTests(unittest.TestCase):
             core.add_senders(["not an address"])
 
 
-class AuthTests(unittest.TestCase):
-    def test_parse_client_installed_and_flat(self):
-        c = auth.parse_client({"installed": {"client_id": "id", "client_secret": "s"}})
-        self.assertEqual((c["client_id"], c["token_uri"]), ("id", auth.TOKEN_URI))
-        with self.assertRaises(auth.AuthError):
-            auth.parse_client({"installed": {"client_id": "id"}})
+class SignInTests(unittest.TestCase):
+    """Gmail calls go through Hermes's credentialed_provider_request; Reading holds no token."""
 
-    def test_save_client_is_private(self):
-        path = auth.save_client({"installed": {"client_id": "id", "client_secret": "s"}})
-        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-        self.assertEqual(auth.load_client()[0]["client_id"], "id")
+    def setUp(self):
+        core._C.email = None
 
-    def test_parse_redirect(self):
-        got = auth.parse_redirect("http://127.0.0.1:5000/?state=abc&code=4/xyz&scope=a")
-        self.assertEqual(got, {"code": "4/xyz", "state": "abc"})
-        self.assertEqual(auth.parse_redirect("4/bare")["code"], "4/bare")
-        with self.assertRaises(auth.AuthError):
-            auth.parse_redirect("http://127.0.0.1/?error=access_denied")
+    def test_call_uses_hermes_helper(self):
+        from hermes_cli import plugin_provider_requests as ppr
+        seen = {}
 
-    def test_find_token_needs_both_scopes(self):
-        shared = Path(TMP) / "google_token.json"
-        shared.write_text(json.dumps({"refresh_token": "r", "scopes": [auth.SCOPES[0]]}))
-        self.assertIsNone(auth.find_token())
-        shared.write_text(json.dumps({"refresh_token": "r", "scopes": auth.SCOPES}))
-        self.assertEqual(auth.find_token()[1], shared)
-        shared.unlink()
+        def fake(provider, method, url, *, json=None, headers=None, timeout=30.0):
+            seen.update(provider=provider, method=method, url=url, json=json)
+            return ppr.ProviderResponse(200, {}, b'{"emailAddress": "me@example.com"}')
 
-    def test_auth_url_has_pkce_and_offline(self):
-        url = auth.auth_url({"client_id": "id"}, "http://127.0.0.1:1/", "st", "ch")
-        for part in ("code_challenge=ch", "access_type=offline", "prompt=consent", "gmail.settings.basic"):
-            self.assertIn(part, url)
+        with mock.patch.object(ppr, "credentialed_provider_request", fake):
+            self.assertEqual(core.account_email(), "me@example.com")
+        self.assertEqual(seen["provider"], "google")
+        self.assertEqual(seen["url"], core.API + "/profile")
 
-    def test_finish_rejects_other_state(self):
-        auth.start({"client_id": "id", "client_secret": "s"}, listen=False)
-        with self.assertRaises(auth.AuthError):
-            auth.finish("http://127.0.0.1:1/?state=wrong&code=c")
+    def test_not_signed_in_is_a_clean_error(self):
+        from hermes_cli import plugin_provider_requests as ppr
+
+        def fake(*a, **k):
+            raise ppr.ProviderNotSignedIn("no grant")
+
+        with mock.patch.object(ppr, "credentialed_provider_request", fake):
+            with self.assertRaises(core.GmailError) as cm:
+                core._call("GET", "/profile")
+        self.assertEqual(cm.exception.code, "not_signed_in")
+        self.assertIn("hermes reading setup", str(cm.exception))
+
+    def test_http_error_status(self):
+        from hermes_cli import plugin_provider_requests as ppr
+        with mock.patch.object(ppr, "credentialed_provider_request",
+                               lambda *a, **k: ppr.ProviderResponse(403, {}, b"denied")):
+            with self.assertRaises(core.GmailError):
+                core._call("GET", "/labels")
+
+    def test_status_without_client(self):
+        with mock.patch.object(core, "client_configured", return_value=False):
+            st = core.status()
+        self.assertEqual((st["client"], st["connected"], st["ready"]), (False, False, False))
+
+    def test_manifest_oauth_block_is_valid(self):
+        import yaml
+        from hermes_cli.plugin_oauth import parse_oauth_clients
+        manifest = yaml.safe_load((ROOT / "plugin.yaml").read_text())
+        clients, problems = parse_oauth_clients(manifest)
+        self.assertEqual(problems, [])
+        self.assertEqual([c.id for c in clients], ["google"])
+        self.assertEqual(list(clients[0].hosts), ["gmail.googleapis.com"])
+
+
+class CliTests(unittest.TestCase):
+    def test_read_client_installed(self):
+        p = Path(TMP) / "client.json"
+        p.write_text(json.dumps({"installed": {"client_id": "x.apps.googleusercontent.com", "client_secret": "s"}}))
+        self.assertEqual(cli._read_client(str(p)), ("x.apps.googleusercontent.com", "s"))
+        p.write_text(json.dumps({"installed": {"client_id": "nope"}}))
+        with self.assertRaises(SystemExit):
+            cli._read_client(str(p))
+
+    def test_children_drop_yolo(self):
+        seen = {}
+        env = {"HERMES_YOLO_MODE": "1", "HERMES_ACP_AUTO_APPROVE": "1", "KEEP": "1"}
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(cli.subprocess, "call", lambda argv, env: seen.update(env=env) or 0):
+            cli._hermes("auth", "status")
+        self.assertNotIn("HERMES_YOLO_MODE", seen["env"])
+        self.assertNotIn("HERMES_ACP_AUTO_APPROVE", seen["env"])
+        self.assertEqual(seen["env"]["KEEP"], "1")
 
 
 if __name__ == "__main__":

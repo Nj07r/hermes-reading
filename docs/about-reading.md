@@ -36,8 +36,13 @@ the list changes. It never touches filters that it did not create.
 Gmail access through a shared client means one company can read the mail of every user. Google
 also asks every app with that access for a yearly security review. With your own client, the
 token belongs to you, and Reading sends your mail to no one. The cost is a three-minute setup in
-Google Cloud Console. Users of the google-workspace skill already have a client, and Reading uses
-it.
+Google Cloud Console.
+
+Hermes, not Reading, runs the sign-in and holds the token. Reading declares the client in
+`plugin.yaml` (`oauth:`), and every Gmail call goes through Hermes's
+`credentialed_provider_request`, which adds the token and sends it only to
+`gmail.googleapis.com`. Reading's code never sees the token or the refresh token. A bug in Reading
+cannot leak them, and `hermes auth logout reading:google` signs you out in one place.
 
 ## Why the scan only suggests
 

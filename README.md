@@ -26,8 +26,9 @@ Hermes Desktop, and a web app on your phone. Hermes reads along with you.
 - **Digests with your own agent.** `hermes reading export --since 24h` gives a cron job the day's
   newsletters as Markdown. The bundled skill shows Hermes how to turn them into a text digest or
   an audio brief.
-- **Your Google client, your token.** Reading talks to the Gmail API with an OAuth client that
-  you own. No telemetry. Public Hermes APIs only.
+- **Your Google client, Hermes holds the token.** Reading talks to the Gmail API with an OAuth
+  client that you own. Hermes runs the sign-in and keeps and refreshes the token; Reading never
+  sees it. No telemetry. Public Hermes APIs only.
 
 ## Install
 
@@ -36,22 +37,36 @@ hermes plugins install Nj07r/hermes-reading
 hermes plugins enable reading
 ```
 
-Restart the gateway. In Hermes Desktop, open **Settings > Plugins** and switch on **Reading**.
-**Reading** appears in the sidebar, under Archive.
+The install asks for `READING_GOOGLE_CLIENT_ID` and `READING_GOOGLE_CLIENT_SECRET`. Press Enter
+to skip them for now: setup sets them. Restart the gateway. In Hermes Desktop, open
+**Settings > Plugins** and switch on **Reading**. **Reading** appears in the sidebar, under Archive.
 
 ## Set up
 
-Open **Reading** in the sidebar. It walks you through three steps:
+Once, about 3 minutes:
 
-1. **Add a Google OAuth client.** Free, about 3 minutes, once: enable the Gmail API, set up the
-   consent screen with yourself as a test user, create a **Desktop app** client and choose its
-   JSON file on the page. If you use the google-workspace skill, Reading finds its client and
-   skips this step.
-2. **Connect Gmail.** Press **Connect Gmail** and allow access in the browser.
-3. **Pick newsletters.** Check the list that the scan found and press **Move**.
+1. **Create a Google OAuth client.** It is free. Enable the
+   [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com), set up the
+   [consent screen](https://console.cloud.google.com/auth/overview) (External, with yourself as a
+   test user), and [create a client](https://console.cloud.google.com/auth/clients) of type
+   **Desktop app**. Download its JSON.
+2. **Connect Gmail** from a terminal:
 
-Prefer the terminal, or no Desktop? `hermes reading setup` does the same. Or ask Hermes: "set up
-Reading for me". The bundled skill knows the steps.
+   ```bash
+   hermes reading setup --client ~/Downloads/client_secret_....json
+   ```
+
+   This saves the client id and secret in your profile's `.env` (with `hermes config set`), then
+   runs `hermes auth add reading:google`, which opens the Google sign-in. Hermes stores the grant.
+   No browser on this machine? Add `--no-browser`.
+3. **Pick newsletters.** The command lists the newsletters it found. Or open **Reading** in the
+   Desktop sidebar: it moves on by itself after the sign-in, and you tick the newsletters and press
+   **Move**.
+
+Or ask Hermes: "set up Reading for me". The bundled skill knows the steps. Hermes cannot run the
+sign-in for you: `hermes auth add` runs only in your own terminal.
+
+To sign out: `hermes auth logout reading:google`.
 
 ## Use it
 
@@ -78,10 +93,22 @@ inbox.
 
 ## Privacy
 
-Reading calls only the Gmail API, the Google sign-in endpoints, and, when you press
-Unsubscribe, the sender's unsubscribe address. Your Google client and token stay in
-`HERMES_HOME/reading/` (mode 600). The `@newsletter:` reference sends the newsletter text to
-your model provider, like any text you paste into a chat.
+What Reading does, before you install it:
+
+- **Network:** the Gmail API (`gmail.googleapis.com`), through Hermes's
+  `credentialed_provider_request`. When you press **Unsubscribe**: a one-click POST to the
+  sender's unsubscribe address, or an unsubscribe email sent from your Gmail account.
+  Nothing else, and no telemetry.
+- **Gmail changes:** it creates the label, writes and deletes its own Gmail filters, moves the
+  routed senders' mail out of the inbox, marks emails as read when you open them, and moves
+  emails to the Trash when you delete them.
+- **Credentials:** none stored by Reading. The Google client id and secret are `.env` variables
+  that Hermes reads. Hermes stores and refreshes the sign-in in its own `auth.json`.
+- **Files:** only its own `HERMES_HOME/reading/` (the sender list and the ids of its filters).
+- **Shell:** `hermes reading setup` runs `hermes config set` and `hermes auth add`, in your
+  terminal only, without the parent's auto-approve or YOLO variables.
+- **Model provider:** the `@newsletter:` reference and **Ask Hermes** send the newsletter text to
+  your model provider, like any text you paste into a chat.
 
 ## Development
 

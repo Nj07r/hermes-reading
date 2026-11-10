@@ -15,6 +15,25 @@ tags: [desktop, gmail, newsletters, reading, email, productivity]
 provides_tools: []
 provides_hooks: []
 python_dependencies: []
+requires_env:
+  - name: READING_GOOGLE_CLIENT_ID
+    description: Client ID of your own Google OAuth client (type Desktop app). `hermes reading setup --client FILE` sets it. Press Enter to skip for now.
+    url: https://console.cloud.google.com/auth/clients
+  - name: READING_GOOGLE_CLIENT_SECRET
+    description: Client secret of the same Google client. `hermes reading setup --client FILE` sets it.
+    url: https://console.cloud.google.com/auth/clients
+    secret: true
+oauth:
+  - id: google
+    authorize_url: https://accounts.google.com/o/oauth2/v2/auth
+    token_url: https://oauth2.googleapis.com/token
+    scopes:
+      - https://www.googleapis.com/auth/gmail.modify
+      - https://www.googleapis.com/auth/gmail.settings.basic
+    client_id_env: READING_GOOGLE_CLIENT_ID
+    client_secret_env: READING_GOOGLE_CLIENT_SECRET
+    hosts: [gmail.googleapis.com]
+    authorize_params: {access_type: offline, prompt: consent}
 config_schema:
   label_name:
     type: str
@@ -35,10 +54,3 @@ config_schema:
     type: bool
     default: true
     label: Mark as read when opened
-  token_path:
-    type: str
-    default: ""
-    label: Google token file
-    description: >-
-      Empty means automatic: HERMES_HOME/reading/token.json, then the google-workspace token
-      if it already has the Gmail scopes Reading needs.
