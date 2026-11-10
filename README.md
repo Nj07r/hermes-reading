@@ -6,6 +6,8 @@ Newsletters are the good part of email, and the inbox is the worst place to read
 moves the senders you pick into one Gmail label and gives that label a calm, fast reader: a page in
 Hermes Desktop, and a web app on your phone. Hermes reads along with you.
 
+![Reading in Hermes Desktop: the list and the email side by side](docs/reader.png)
+
 
 ## Why it is different
 
