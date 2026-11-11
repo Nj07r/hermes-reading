@@ -99,8 +99,15 @@ What Reading does, before you install it:
 
 - **Network:** the Gmail API (`gmail.googleapis.com`), through Hermes's
   `credentialed_provider_request`. When you press **Unsubscribe**: a one-click POST to the
-  sender's unsubscribe address, or an unsubscribe email sent from your Gmail account.
+  sender's unsubscribe address (https only, never to a private, loopback or link-local address,
+  checked again on every redirect), or an unsubscribe email sent from your Gmail account.
   Nothing else, and no telemetry.
+- **Emails on screen:** each email shows in a sandboxed frame with an opaque origin. Its own
+  scripts, event handlers and nested frames are removed, and its CSP runs only Reading's small
+  helper script (size, keys, swipes). In Desktop the reader page itself runs in the SDK's
+  `SandboxedFrame` and reaches the app only through a short list of messages.
+- **Dashboard calls:** the page's backend refuses cross-site requests, and calls that change
+  mail or settings are POST only.
 - **Gmail changes:** it creates the label, writes and deletes its own Gmail filters, moves the
   routed senders' mail out of the inbox, marks emails as read when you open them, and moves
   emails to the Trash when you delete them.

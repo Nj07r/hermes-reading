@@ -318,13 +318,13 @@ body.idle .acts, body.idle #pos, body.idle #dock { visibility: hidden; }
     <div id="viewport">
       <div id="track" hidden>
       <div class="slot"><article class="sheet"><h1 class="subject"></h1><div class="smeta"></div>
-        <div class="paper"><iframe title="Newsletter" sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer"></iframe><div class="loading"><i style="width:62%"></i><i style="width:88%"></i><i style="width:80%"></i><i style="width:46%"></i></div></div>
+        <div class="paper"><iframe title="Newsletter" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer"></iframe><div class="loading"><i style="width:62%"></i><i style="width:88%"></i><i style="width:80%"></i><i style="width:46%"></i></div></div>
       </article></div>
       <div class="slot"><article class="sheet"><h1 class="subject"></h1><div class="smeta"></div>
-        <div class="paper"><iframe title="Newsletter" sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer"></iframe><div class="loading"><i style="width:62%"></i><i style="width:88%"></i><i style="width:80%"></i><i style="width:46%"></i></div></div>
+        <div class="paper"><iframe title="Newsletter" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer"></iframe><div class="loading"><i style="width:62%"></i><i style="width:88%"></i><i style="width:80%"></i><i style="width:46%"></i></div></div>
       </article></div>
       <div class="slot"><article class="sheet"><h1 class="subject"></h1><div class="smeta"></div>
-        <div class="paper"><iframe title="Newsletter" sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer"></iframe><div class="loading"><i style="width:62%"></i><i style="width:88%"></i><i style="width:80%"></i><i style="width:46%"></i></div></div>
+        <div class="paper"><iframe title="Newsletter" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer"></iframe><div class="loading"><i style="width:62%"></i><i style="width:88%"></i><i style="width:80%"></i><i style="width:46%"></i></div></div>
       </article></div>
       </div>
       <div id="empty"></div>
@@ -376,9 +376,39 @@ body.idle .acts, body.idle #pos, body.idle #dock { visibility: hidden; }
 
 <script>
 "use strict";
-/* In Hermes Desktop, the page runs in a srcdoc frame and desktop/plugin.js injects
-   window.__readingHost on its own window: calls go through the plugin REST door, links and copy through the OS door. */
-const HOST = (() => { try { return window.parent !== window && window.parent.__readingHost || null; } catch { return null; } })();
+/* In Hermes Desktop, desktop/plugin.js shows this page in the SDK's SandboxedFrame (an opaque origin, no
+   reach into the app) and marks it with <meta name="reading-host">. Calls, links, copy and prefs then go to
+   the plugin by postMessage: calls through the plugin REST door, links and copy through the OS door. */
+const HOST = (() => {
+  const meta = document.querySelector('meta[name="reading-host"]');
+  if (!meta || window.parent === window) return null;
+  let seq = 0;
+  const waiting = new Map();
+  addEventListener("message", (e) => {
+    const d = e.data;
+    if (e.source !== window.parent || d?.type !== "reading-reply" || !waiting.has(d.seq)) return;
+    const w = waiting.get(d.seq); waiting.delete(d.seq);
+    if (d.error) w.reject(new Error(d.error)); else w.resolve(d.result);
+  });
+  const send = (op, ...args) => new Promise((resolve, reject) => {
+    const n = ++seq; waiting.set(n, { resolve, reject });
+    window.parent.postMessage({ type: "reading-call", seq: n, op, args }, "*");
+  });
+  let prefs = {};
+  try { prefs = JSON.parse(meta.dataset.prefs || "{}"); } catch {}
+  return {
+    call: (name, id, method, body) => send("call", name, id, method, body),
+    open: (url) => send("open", url), copy: (text) => send("copy", text), count: (n) => send("count", n),
+    ask: (id) => send("ask", id), chat: (text) => send("chat", text),
+    get prefs() { return JSON.parse(JSON.stringify(prefs)); },
+    savePrefs: (p) => { prefs = p; return send("savePrefs", p); },
+  };
+})();
+/* Email frames get allow-scripts without allow-same-origin: an opaque origin, so the email cannot reach
+   this page, its storage or the app. The page cannot reach into the frame either (in Desktop a frame nested
+   in SandboxedFrame is opaque whatever its tokens). The only script that runs there is FRAME_HELPER, pinned
+   by a nonce in the frame's CSP; it sends size, keys, swipes and (in Desktop) link clicks by postMessage.
+   iPhone Safari also needs a frame that may run scripts to pass touches on, so swipes work over the email. */
 const API = HOST ? "" : location.pathname.replace(/\/(app\/?)?$/, "");   /* "/api/plugins/reading" on the dashboard */
 function setHash(id) { if (!HOST) history.replaceState(null, "", id ? "#" + encodeURIComponent(id) : location.pathname); }
 function openUrl(url) { if (!/^https?:/i.test(url || "")) return; if (HOST) HOST.open(url); else window.open(url, "_blank", "noopener"); }
@@ -562,17 +592,73 @@ function fetchMsg(id) {
   return S.cache.get(id);
 }
 
+/* Web only: the one script an email frame runs (opaque origin, so it cannot reach this page).
+   It does what wireFrame does from outside in Desktop: fit, dark switch, keys and swipes. */
+const FRAME_HELPER = `(() => {
+  const ROUTE_LINKS = ${!!HOST};
+  const de = document.documentElement, up = (m) => parent.postMessage(Object.assign({ rf: 1 }, m), "*");
+  if (ROUTE_LINKS) addEventListener("click", (e) => {
+    const a = e.target.closest && e.target.closest("a[href]");
+    if (!a || (a.getAttribute("href") || "").startsWith("#")) return;
+    e.preventDefault();
+    up({ t: "link", href: a.href });
+  }, true);
+  let raf = 0, sx = null, sy = 0, lock = null, top = false;
+  const fit = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() =>
+    up({ t: "h", h: Math.ceil(Math.max(de.getBoundingClientRect().height, de.scrollHeight, document.body ? document.body.scrollHeight : 0)) })); };
+  addEventListener("load", () => {
+    const b = document.body;
+    if (de.scrollWidth > de.clientWidth + 1 && b) { b.style.setProperty("padding-left", "0", "important"); b.style.setProperty("padding-right", "0", "important"); }
+    if (de.scrollWidth > de.clientWidth + 2) de.style.zoom = (de.clientWidth / de.scrollWidth).toFixed(4);
+    new ResizeObserver(fit).observe(de);
+    fit();
+  });
+  addEventListener("message", (e) => {
+    const d = e.data;
+    if (e.source !== parent || !d || d.rf !== 1) return;
+    if (d.t === "top") top = !!d.on;
+    else if (d.t === "dark") {
+      if (d.fade) { de.classList.add("fadeswap"); setTimeout(() => de.classList.remove("fadeswap"), 450); }
+      de.classList.toggle("rdark", !!d.on);
+    }
+  });
+  const KEYS = ["j", "k", "d", "z", "u", "c", "a", "s", "o", "t", "r", " ", "#", "?", "Enter", "Escape", "Delete", "Backspace", "ArrowLeft", "ArrowRight"];
+  addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    up({ t: "key", key: e.key, shift: e.shiftKey });
+    if (KEYS.includes(e.key)) e.preventDefault();
+  });
+  addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) return;
+    sx = e.touches[0].screenX; sy = e.touches[0].screenY; lock = null;
+    up({ t: "ts", x: sx, y: sy });
+  }, { passive: true });
+  addEventListener("touchmove", (e) => {
+    if (sx === null || lock === "y") return;
+    const p = e.touches[0], x = p.screenX - sx, y = p.screenY - sy;
+    if (!lock) {
+      if (Math.abs(x) < 8 && Math.abs(y) < 8) return;
+      lock = Math.abs(x) > Math.abs(y) * 1.2 ? "x" : (top && y > 0 ? "pull" : "y");
+      if (lock === "y") return;
+    }
+    e.preventDefault();
+    up({ t: "tm", x: p.screenX, y: p.screenY });
+  }, { passive: false });
+  const end = () => { if (sx !== null) { sx = null; up({ t: "te" }); } };
+  addEventListener("touchend", end); addEventListener("touchcancel", end);
+})();`;
+
 /* Emails with their own dark design get it switched on or off; the rest get inverted. */
 const NATIVE_DARK = /\(\s*prefers-color-scheme\s*:\s*dark\s*\)/gi;
 function frameDoc(html, dark) {
-  if (NATIVE_DARK.test(html)) {
-    NATIVE_DARK.lastIndex = 0;
+  const native = NATIVE_DARK.test(html);
+  NATIVE_DARK.lastIndex = 0;
+  if (native) {
     html = html.replace(NATIVE_DARK, dark ? "(min-width:0px)" : "(max-width:-1px)");
     html = html.replace(/<head[^>]*>/i, (m) => m + `<style>:root{color-scheme:${dark ? "dark" : "light"}!important}</style>`);
   }
-  /* Safari fires the parent's touch/key listeners inside the frame only when the frame may run
-     scripts. So the frame gets allow-scripts, and the email itself can run nothing: every script,
-     handler attribute, javascript: URL and nested frame is removed here, and a CSP blocks the rest. */
+  /* The email itself runs nothing: every script, handler attribute, javascript: URL and nested
+     frame is removed here, and a CSP blocks the rest. On the web the CSP lets FRAME_HELPER run by its nonce. */
   const doc = new DOMParser().parseFromString(html, "text/html");
   doc.querySelectorAll("script, noscript, iframe, frame, frameset, object, embed, applet, base, form, meta[http-equiv]").forEach((n) => n.remove());
   for (const el of doc.querySelectorAll("*")) {
@@ -582,8 +668,11 @@ function frameDoc(html, dark) {
           (/^(href|src|action|xlink:href|background|poster|data)$/.test(n) && /^(javascript|vbscript|data:text\/html)/.test(v))) el.removeAttribute(a.name);
     }
   }
+  if (!native && dark) doc.documentElement.classList.add("rdark");
+  const nonce = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
   const head = doc.head || doc.documentElement.insertBefore(doc.createElement("head"), doc.body);
-  head.insertAdjacentHTML("afterbegin", `<meta http-equiv="Content-Security-Policy" content="script-src 'none'; object-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'">
+  head.insertAdjacentHTML("afterbegin", `<script nonce="${nonce}">${FRAME_HELPER}<\/script>`);
+  head.insertAdjacentHTML("afterbegin", `<meta http-equiv="Content-Security-Policy" content="script-src 'nonce-${nonce}'; object-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'">
 <base target="_blank"><meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 html,body{margin:0!important;padding:0;height:auto!important;min-height:0!important}body{padding:14px 16px!important;max-width:100%;overflow-x:hidden;overflow-wrap:anywhere}
@@ -602,7 +691,7 @@ html.rdark [style*="url("] img,html.rdark [background*="."] img{filter:none}
    the slots rotate instead of reloading, so the email you landed on is the one you already saw. */
 const GAP = 22;                                   /* px of seam between neighbouring emails */
 const SLOTS = $$(".slot").map((el) => ({ el, frame: el.querySelector("iframe"), subj: el.querySelector(".subject"),
-  meta: el.querySelector(".smeta"), sheet: el.querySelector(".sheet"), id: null, m: null, ro: null, raf: 0 }));
+  meta: el.querySelector(".smeta"), sheet: el.querySelector(".sheet"), id: null, m: null }));
 let order = SLOTS.slice();                        /* [previous, current, next] */
 const curSlot = () => order[1];
 const slotW = () => $("#viewport").clientWidth + GAP;
@@ -691,6 +780,7 @@ function show(i, { enter = 0, settle = 0 } = {}) {
   setTheme(darkFor(m), { save: false });
   setLinks(S.ready.get(m.id));
   loadNeighbours();
+  syncTop(s);
 }
 
 function metaHtml(m, full) {
@@ -706,37 +796,14 @@ function setLinks(full) {
 function renderFrame(s, m, full) {
   const f = s.frame;
   m.native = /prefers-color-scheme\s*:\s*dark/i.test(full.html);
-  f.onload = () => { if (s.id === m.id) wireFrame(s, m); };
+  f.onload = () => { if (s.id === m.id) wireFrame(s); };
   f.srcdoc = frameDoc(full.html, darkFor(m));
 }
 
-function wireFrame(s, m) {
-  const f = s.frame, d = f.contentDocument;
-  if (!d) return;
-  routeLinks(d);
-  d.documentElement.classList.toggle("rdark", !m.native && darkFor(m));
-  /* Gutter by default; full-bleed newsletters (own 100% wrapper and padding) overflow it, so drop it for them.
-     Fixed-width newsletters (600px tables): scale down to fit, like the Gmail app. */
-  const de = d.documentElement;
-  de.style.zoom = "";
-  if (de.scrollWidth > de.clientWidth + 1 && d.body) { d.body.style.setProperty("padding-left", "0", "important"); d.body.style.setProperty("padding-right", "0", "important"); }
-  const over = de.scrollWidth, room = de.clientWidth;
-  if (over > room + 2) de.style.zoom = (room / over).toFixed(4);
-  const fit = () => {
-    cancelAnimationFrame(s.raf);
-    s.raf = requestAnimationFrame(() => {
-      /* with the frame at 0px, scrollHeight is the content height; floats and odd layouts still count */
-      const h = Math.ceil(Math.max(de.getBoundingClientRect().height, de.scrollHeight, d.body?.scrollHeight || 0));
-      if (Math.abs(h - f.offsetHeight) > 2) f.style.height = h + "px";
-    });
-  };
-  f.style.height = "0px";  /* measure from zero, so a short email after a long one shrinks the frame */
-  fit();
-  s.ro?.disconnect();
-  s.ro = new ResizeObserver(fit); s.ro.observe(de);
-  d.addEventListener("keydown", onKey);
-  swipeOn(d);
-  requestAnimationFrame(() => f.classList.add("on"));
+/* FRAME_HELPER fits the email and forwards its input; the page only shows the frame. */
+function wireFrame(s) {
+  syncTop(s);
+  requestAnimationFrame(() => s.frame.classList.add("on"));
 }
 
 function showEmpty(joy) {
@@ -830,7 +897,7 @@ async function copy() {
   if (!full.web) toast("Gmail link copied. This email has no web version.");
 }
 
-function prefs() { try { return JSON.parse(localStorage.getItem("reading.prefs") || "{}"); } catch { return {}; } }
+function prefs() { if (HOST) return HOST.prefs; try { return JSON.parse(localStorage.getItem("reading.prefs") || "{}"); } catch { return {}; } }
 function darkFor(m) { const p = prefs(); return m && m.email in (p.sender || {}) ? p.sender[m.email] : p.dark !== false; }
 
 /* Dark or original colors: remembered per sender, so a designed newsletter stays in its own colors. */
@@ -839,7 +906,7 @@ function setTheme(dark, { save = true } = {}) {
   if (save) {
     const p = prefs();
     if (m) { p.sender = p.sender || {}; p.sender[m.email] = dark; } else p.dark = dark;
-    localStorage.setItem("reading.prefs", JSON.stringify(p));
+    if (HOST) HOST.savePrefs(p); else localStorage.setItem("reading.prefs", JSON.stringify(p));
   }
   document.body.classList.toggle("dark", dark);
   $$('[data-do="theme"]').forEach((b) => {
@@ -847,14 +914,13 @@ function setTheme(dark, { save = true } = {}) {
     b.title = dark ? `Original colors for ${m ? m.from : "emails"} (t)` : `Dark for ${m ? m.from : "emails"} (t)`;
     const s = b.querySelector("span"); if (s) s.textContent = dark ? "Original" : "Dark";
   });
-  const s = curSlot(), fd = s.frame.contentDocument?.documentElement;
+  const s = curSlot();
   if (m && s.id === m.id) s.el.classList.toggle("dark", dark);
   if (save && m?.native && m.full && s.id === m.id) {
     const f = s.frame; f.style.transition = "opacity .14s"; f.classList.remove("on");
     setTimeout(() => { f.style.transition = ""; renderFrame(s, m, m.full); }, 140);
-  } else if (fd && (!m || s.id === m.id)) {
-    if (save) { fd.classList.add("fadeswap"); clearTimeout(fd._t); fd._t = setTimeout(() => fd.classList.remove("fadeswap"), 450); }
-    fd.classList.toggle("rdark", dark);
+  } else if (s.id && (!m || s.id === m.id) && !m?.native) {
+    s.frame.contentWindow?.postMessage({ rf: 1, t: "dark", on: dark, fade: save }, "*");
   }
   if (save) $$('[data-do="theme"] svg.i').forEach((ic) => ic.animate([{ transform: "rotate(-120deg) scale(.5)", opacity: 0 }, { transform: "none", opacity: 1 }], { duration: 420, easing: "cubic-bezier(.2,.8,.2,1)" }));
   if (save && m) toast(dark ? `Dark for ${m.from} from now on` : `Original colors for ${m.from} from now on`);
@@ -894,7 +960,7 @@ routeLinks(document);
 $("#undo").addEventListener("click", undo);
 $("#help").addEventListener("click", () => $("#help").classList.remove("on"));
 $("#items").addEventListener("scroll", () => $(".lhead").classList.toggle("scrolled", $("#items").scrollTop > 4), { passive: true });
-SLOTS.forEach((s) => s.el.addEventListener("scroll", () => { if (s === curSlot()) $("#rbar").classList.toggle("scrolled", s.el.scrollTop > 8); }, { passive: true }));
+SLOTS.forEach((s) => s.el.addEventListener("scroll", () => { if (s === curSlot()) { $("#rbar").classList.toggle("scrolled", s.el.scrollTop > 8); syncTop(s); } }, { passive: true }));
 
 /* ---------- keys ---------- */
 function onKey(e) {
@@ -960,35 +1026,40 @@ function pullRelease(go) {
   }
 }
 
-function swipeOn(target) {
-  let sx = null, sy, t0, lock, dx, pull, atTop, armed, lastY, lastT, vy;
-  target.addEventListener("touchstart", (e) => {
-    if (e.touches.length !== 1) return;
-    sx = e.touches[0].screenX; sy = e.touches[0].screenY; t0 = lastT = performance.now(); lastY = sy;
+const atTop = (s) => phone.matches && document.body.classList.contains("reading") && s.el.scrollTop <= 0;
+/* Web: the email frame's helper decides pull vs scroll at the touch's start, so it needs to know. */
+function syncTop(s) { if (s.id) s.frame.contentWindow?.postMessage({ rf: 1, t: "top", on: atTop(s) }, "*"); }
+
+/* One swipe: start, move (true when the swipe takes the touch, so the caller prevents scrolling), end.
+   Touches come from the page itself, or from an email frame's FRAME_HELPER by postMessage. */
+function swipeGesture() {
+  let sx = null, sy, t0, lock, dx, pull, top, armed, lastY, lastT, vy;
+  const start = (x0, y0) => {
+    sx = x0; sy = y0; t0 = lastT = performance.now(); lastY = sy;
     lock = null; dx = 0; pull = 0; armed = false; vy = 0;
-    atTop = phone.matches && document.body.classList.contains("reading") && curSlot().el.scrollTop <= 0;
-  }, { passive: true });
-  target.addEventListener("touchmove", (e) => {
-    if (sx == null || lock === "y") return;
-    const x = e.touches[0].screenX - sx, y = e.touches[0].screenY - sy;
+    top = atTop(curSlot());
+  };
+  const move = (px, py) => {
+    if (sx == null || lock === "y") return false;
+    const x = px - sx, y = py - sy;
     if (!lock) {
-      if (Math.abs(x) < 8 && Math.abs(y) < 8) return;
-      lock = Math.abs(x) > Math.abs(y) * 1.2 ? "x" : (atTop && y > 0 ? "pull" : "y");
-      if (lock === "y") return;
+      if (Math.abs(x) < 8 && Math.abs(y) < 8) return false;
+      lock = Math.abs(x) > Math.abs(y) * 1.2 ? "x" : (top && y > 0 ? "pull" : "y");
+      if (lock === "y") return false;
     }
-    e.preventDefault();
     if (lock === "pull") {
-      const now = performance.now(), sy2 = e.touches[0].screenY;
-      vy = (sy2 - lastY) / Math.max(1, now - lastT); lastY = sy2; lastT = now;
+      const now = performance.now();
+      vy = (py - lastY) / Math.max(1, now - lastT); lastY = py; lastT = now;
       pull = damp(y);
       const was = armed; armed = pull >= PULL_GO;
       if (armed !== was) buzz();
       pullTo(pull, armed);
-      return;
+      return true;
     }
     dx = S.view.length < 2 ? x * 0.3 : x;
     setTrack(dx);
-  }, { passive: false });
+    return true;
+  };
   const end = () => {
     if (lock === "pull") { sx = null; pullRelease(armed || (vy > 0.9 && pull > 40)); return; }
     if (lock !== "x") { sx = null; return; }
@@ -1001,9 +1072,29 @@ function swipeOn(target) {
       setTimeout(() => { show(j, { settle: dir }); wrapped(from, j, dir); }, Math.max(140, Math.min(300, rest / Math.max(v, 1.2))) + 10);
     } else setTrack(0, 260);
   };
-  target.addEventListener("touchend", end); target.addEventListener("touchcancel", end);
+  return { ts: start, tm: move, te: end };
+}
+function swipeOn(target) {
+  const g = swipeGesture();
+  target.addEventListener("touchstart", (e) => { if (e.touches.length === 1) g.ts(e.touches[0].screenX, e.touches[0].screenY); }, { passive: true });
+  target.addEventListener("touchmove", (e) => { if (g.tm(e.touches[0].screenX, e.touches[0].screenY)) e.preventDefault(); }, { passive: false });
+  target.addEventListener("touchend", g.te); target.addEventListener("touchcancel", g.te);
 }
 swipeOn($("#viewport"));
+
+/* Web: size, keys and swipes from the email frames' FRAME_HELPER. */
+const frameSwipe = swipeGesture();
+addEventListener("message", (e) => {
+  const d = e.data, s = SLOTS.find((x) => x.frame.contentWindow === e.source);
+  if (!s || !d || d.rf !== 1) return;
+  if (d.t === "h") { const h = Math.max(0, Math.ceil(+d.h || 0)); if (Math.abs(h - s.frame.offsetHeight) > 2) s.frame.style.height = h + "px"; }
+  else if (s !== curSlot()) return;
+  else if (d.t === "link") openUrl(String(d.href));
+  else if (d.t === "key") onKey({ key: String(d.key), shiftKey: !!d.shift, target: document.body, preventDefault() {} });
+  else if (d.t === "ts") frameSwipe.ts(+d.x, +d.y);
+  else if (d.t === "tm") frameSwipe.tm(+d.x, +d.y);
+  else if (d.t === "te") frameSwipe.te();
+});
 
 /* ---------- touch: swipe a row left to delete, pull down to refresh ---------- */
 (() => {

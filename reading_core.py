@@ -18,8 +18,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import html
+import ipaddress
 import json
 import re
+import socket
 import sys
 import time
 import types
@@ -89,8 +91,12 @@ def label_name() -> str:
 
 
 def data_dir() -> Path:
-    import os
-    home = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
+    try:
+        from hermes_constants import get_hermes_home
+        home = Path(get_hermes_home())
+    except ImportError:  # unit tests and the standalone CLI outside Hermes
+        import os
+        home = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
     d = home / PLUGIN_ID
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -566,11 +572,39 @@ def _send_mailto(mailto: str) -> None:
     _call("POST", "/messages/send", body={"raw": raw})
 
 
+def public_https(url: str) -> bool:
+    """True when the URL is https and every address its host resolves to is public. The
+    one-click URL comes from the sender, so it must not reach this machine or its network."""
+    u = urllib.parse.urlsplit(url)
+    if u.scheme != "https" or not u.hostname:
+        return False
+    try:
+        infos = socket.getaddrinfo(u.hostname, u.port or 443, proto=socket.IPPROTO_TCP)
+    except (OSError, ValueError):
+        return False
+    for info in infos:
+        ip = ipaddress.ip_address(str(info[4][0]).split("%")[0])
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+            ip = ip.ipv4_mapped
+        if not ip.is_global or ip.is_multicast:
+            return False
+    return bool(infos)
+
+
+class _PublicRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not public_https(newurl):
+            raise urllib.error.URLError(f"redirect to a non-public address: {newurl}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def _one_click(url: str) -> bool:
+    if not public_https(url):
+        return False
     req = urllib.request.Request(url, data=b"List-Unsubscribe=One-Click", method="POST", headers={
         "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Hermes-Reading/1.0"})
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
+        with urllib.request.build_opener(_PublicRedirects).open(req, timeout=20) as r:
             return 200 <= r.status < 400
     except Exception:
         return False

@@ -234,5 +234,62 @@ class CliTests(unittest.TestCase):
         self.assertEqual(seen["env"]["KEEP"], "1")
 
 
+def fake_dns(*ips):
+    return lambda host, port, proto=0: [(2, 1, 6, "", (ip, port)) for ip in ips]
+
+
+class UnsubscribeSafetyTests(unittest.TestCase):
+    def test_only_public_https_hosts(self):
+        with mock.patch.object(core.socket, "getaddrinfo", fake_dns("93.184.216.34")):
+            self.assertTrue(core.public_https("https://news.example/unsub"))
+            self.assertFalse(core.public_https("http://news.example/unsub"))
+        for ip in ("127.0.0.1", "10.0.0.5", "192.168.1.1", "169.254.169.254", "100.64.0.1", "::1",
+                   "fe80::1", "::ffff:127.0.0.1", "0.0.0.0"):
+            with mock.patch.object(core.socket, "getaddrinfo", fake_dns(ip)):
+                self.assertFalse(core.public_https("https://news.example/unsub"), ip)
+        with mock.patch.object(core.socket, "getaddrinfo", fake_dns("93.184.216.34", "127.0.0.1")):
+            self.assertFalse(core.public_https("https://news.example/unsub"))
+
+    def test_one_click_never_posts_to_a_private_host(self):
+        with mock.patch.object(core.socket, "getaddrinfo", fake_dns("169.254.169.254")), \
+                mock.patch.object(core.urllib.request, "build_opener") as opener:
+            self.assertFalse(core._one_click("https://metadata.example/x"))
+        opener.assert_not_called()
+
+    def test_redirect_to_a_private_host_is_refused(self):
+        handler = core._PublicRedirects()
+        req = core.urllib.request.Request("https://news.example/unsub", data=b"x", method="POST")
+        with mock.patch.object(core.socket, "getaddrinfo", fake_dns("127.0.0.1")):
+            with self.assertRaises(core.urllib.error.URLError):
+                handler.redirect_request(req, None, 302, "Found", {}, "https://localhost/admin")
+
+
+class DashboardGuardTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        try:
+            sys.path.insert(0, str(ROOT / "dashboard"))
+            import plugin_api
+        except ImportError as exc:  # fastapi lives in the Hermes venv
+            raise unittest.SkipTest(f"fastapi not available: {exc}")
+        cls.api = plugin_api
+
+    def test_changes_need_post(self):
+        page = {"x-reading": "1", "sec-fetch-site": "same-origin"}
+        self.assertEqual(self.api.refusal("unsubscribe", "GET", page), "unsubscribe needs POST")
+        self.assertEqual(self.api.refusal("unsubscribe", "POST", page), "")
+        self.assertEqual(self.api.refusal("messages", "GET", page), "")
+
+    def test_cross_site_and_headerless_requests_are_refused(self):
+        self.assertEqual(self.api.refusal("trash", "POST", {"x-reading": "1", "sec-fetch-site": "cross-site"}),
+                         "cross-site request")
+        self.assertEqual(self.api.refusal("trash", "POST", {"sec-fetch-site": "same-origin",
+                                                             "content-type": "text/plain"}), "missing X-Reading header")
+
+    def test_desktop_rest_door_passes(self):
+        # Desktop's main process sends JSON and no Sec-Fetch-* headers.
+        self.assertEqual(self.api.refusal("trash", "POST", {"content-type": "application/json"}), "")
+
+
 if __name__ == "__main__":
     unittest.main()
